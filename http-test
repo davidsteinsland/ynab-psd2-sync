@@ -28,11 +28,11 @@ sjekk_session() {
 hent_transaksjoner() {
   local sessionIndex="$1"
   echo "Velg konto:"
-  jq -r '.sessions['$sessionIndex'].accounts | to_entries[] | "[\(.key)] \(.value.details.account_id.other.identification)  \(.value.product)"' < ~/.ynab-enablebanking.json
+  jq -r '.sessions['$sessionIndex'].accounts | to_entries[] | "[\(.key)] \(.value.details.account_id.other.identification)  \(.value.product)"' < $STATE_FILE
 
   read -p "(skriv tallet): " choice
 
-  ACCOUNTID=$(jq -r ".sessions[$sessionIndex].accounts[$choice].uid" < ~/.ynab-enablebanking.json)
+  ACCOUNTID=$(jq -r ".sessions[$sessionIndex].accounts[$choice].uid" < $STATE_FILE)
 
   local today=$(date +%Y-%m-%d)
   local weekAgo=$(date -v-7d +%Y-%m-%d)
@@ -74,11 +74,11 @@ apiRequest() {
 }
 
 echo "Velg Session IDs:"
-jq -r '.sessions | to_entries[] | "[\(.key)] \(.value.sessionId) - \(.value.aspspName)"' < ~/.ynab-enablebanking.json
+jq -r '.sessions | to_entries[] | "[\(.key)] \(.value.sessionId) - \(.value.aspspName)"' < $STATE_FILE
 
 read -p "(skriv tallet): " choice
 
-SID=$(jq -r ".sessions[$choice].sessionId" < ~/.ynab-enablebanking.json)
+SID=$(jq -r ".sessions[$choice].sessionId" < $STATE_FILE)
 
 read -p "Hva vil du gjøre?
 [0] Sjekke session
