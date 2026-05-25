@@ -1,0 +1,160 @@
+package com.github.davidsteinsland.ynab_psd2_sync.enablebanking
+
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonSubTypes
+import com.fasterxml.jackson.annotation.JsonTypeInfo
+import org.slf4j.LoggerFactory
+import tools.jackson.core.util.DefaultIndenter
+import tools.jackson.core.util.DefaultPrettyPrinter
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.jacksonMapperBuilder
+import tools.jackson.module.kotlin.readValue
+import java.io.File
+import kotlin.system.exitProcess
+
+internal val log = LoggerFactory.getLogger("enablebanking.Main")
+
+/**
+ * Miljøvariabler:
+ *   ENABLEBANKING_APPLICATION_ID - applikasjons-ID (UUID) fra https://enablebanking.com/cp/applications
+ *   ENABLEBANKING_PRIVATE_KEY - PEM-innhold (selve nøkkelen, ikke en filsti) lastet ned ved opprettelse av appen
+ *   YNAB_ACCESS_TOKEN - Personal Access Token fra app.ynab.com (kun nødvendig for --map-accounts og --push)
+ *
+ * Bruk:
+ *   ./gradlew :enablebanking:run --args="--list-aspsps"
+ *   ./gradlew :enablebanking:run --args="--init"
+ *   ./gradlew :enablebanking:run --args="--map-accounts"      # mapper EB-kontoer til YNAB-kontoer
+ *   ./gradlew :enablebanking:run                              # henter siste 90 dager (kun CSV)
+ *   ./gradlew :enablebanking:run --args="--push"              # henter og pusher til YNAB
+ *   ./gradlew :enablebanking:run --args="--push --push-from 2026-05-15"
+ *   ./gradlew :enablebanking:run --args="--push-from-cache"
+ *   ./gradlew :enablebanking:run --args="--push-from-cache --push-from 2026-05-15"
+ */
+fun main(args: Array<String>) {
+    try {
+        run(args.toList())
+    } catch (e: Exception) {
+        log.error(e.message, e)
+        System.err.println(e.message)
+        exitProcess(1)
+    }
+}
+
+internal sealed interface Command {
+    fun run()
+}
+
+private fun run(args: List<String>) {
+    val prettyPrinter = DefaultPrettyPrinter().apply {
+        indentArraysWith(DefaultIndenter.SYSTEM_LINEFEED_INSTANCE)
+    }
+
+    val objectMapper = jacksonMapperBuilder()
+        .defaultPrettyPrinter(prettyPrinter)
+        .build()
+
+    val applicationId = env("ENABLEBANKING_APPLICATION_ID")
+    val client = EnableBankingClient(applicationId, env("ENABLEBANKING_PRIVATE_KEY"), objectMapper)
+
+    val defaultStateStoreFile = File(System.getProperty("user.home"), ".ynab-enablebanking.json")
+    val userProvidedStateStoreFile = System.getenv("YNAB_EB_STATE_FILE")?.let { File(it) }
+    val stateStore = StateStore(userProvidedStateStoreFile ?: defaultStateStoreFile, objectMapper)
+
+    val mappingsFile = parseFlag(args, "--mappings")?.let { File(it) } ?: File(".ynab.json")
+    val mappingsStore = YnabMappingsStore(mappingsFile, objectMapper)
+
+    val ynabClient by lazy { YnabClient(env("YNAB_ACCESS_TOKEN"), objectMapper) }
+
+    val cmd = when {
+        "--list-aspsps" in args -> ListAspsps(client)
+        "--list-sessions" in args -> ListSessions(client, stateStore)
+        "--remove-session" in args -> {
+            val name = args.getOrNull(args.indexOf("--remove-session") + 1)
+                ?: error("Bruk: --remove-session \"<aspsp name>\"")
+            RemoveSession(stateStore, name)
+        }
+        "--init" in args -> InitSessions(client, stateStore)
+        "--map-accounts" in args -> MapAccounts(ynabClient, mappingsStore, objectMapper)
+        "--sync-ynab" in args -> SyncToYnab(ynabClient, mappingsStore, objectMapper)
+        else -> FetchTransactions(client, stateStore, mappingsStore, objectMapper)
+    }
+    cmd.run()
+}
+
+private fun parseFlag(args: List<String>, name: String): String? {
+    val idx = args.indexOf(name)
+    if (idx < 0) return null
+    return args.getOrNull(idx + 1) ?: error("Bruk: $name <verdi>")
+}
+
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
+@JsonSubTypes(
+    JsonSubTypes.Type(value = AccountNumber.BasicBankAccountNumber::class, name = "BBAN"),
+    JsonSubTypes.Type(value = AccountNumber.CardPAN::class, name = "CPAN"),
+    JsonSubTypes.Type(value = AccountNumber.InternationalBankAccountNumber::class, name = "IBAN"),
+)
+sealed interface AccountNumber {
+    val accountNumber: String
+
+    data class BasicBankAccountNumber(
+        @param:JsonProperty("value") override val accountNumber: String,
+    ) : AccountNumber
+
+    data class CardPAN(
+        @param:JsonProperty("value") override val accountNumber: String,
+    ) : AccountNumber
+
+    data class InternationalBankAccountNumber(
+        @param:JsonProperty("value") override val accountNumber: String,
+    ) : AccountNumber
+}
+
+private fun env(name: String) = System.getenv(name)
+    ?: error("Miljøvariabel $name må være satt")
+
+internal data class RootState(
+    val sessions: List<SessionState> = emptyList(),
+)
+
+internal data class SessionState(
+    val sessionId: String,
+    val aspspName: String,
+    val aspspCountry: String,
+    val validUntil: String? = null,
+    val accounts: List<CachedAccount> = emptyList(),
+)
+
+internal data class CachedAccount(
+    val uid: String,
+    val primaryAccountNumber: AccountNumber,
+    val accountNumbers: List<AccountNumber>,
+    val name: String,
+    val product: String,
+    val cashAccountType: String? = null,
+    val details: JsonNode? = null,
+) {
+    init {
+        check(accountNumbers.isNotEmpty()) {
+            "kan ikke ha en tom liste av account numbers"
+        }
+    }
+}
+
+internal class StateStore(private val file: File, private val objectMapper: ObjectMapper) {
+    fun saveRoot(root: RootState) {
+        file.writeText(objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(root))
+        log.info("Lagret state ({} sesjon(er)) i {}", root.sessions.size, file)
+    }
+
+    /**
+     * Leser state-fila. Støtter både ny `RootState`-form (objekt med `sessions`) og
+     * gammel form (rå JSON-array av `SessionState`) for å migrere uten å miste sesjoner.
+     */
+    fun loadRoot(): RootState {
+        if (!file.exists()) return RootState()
+        return objectMapper.readValue<RootState>(file)
+    }
+
+    fun load(): List<SessionState> = loadRoot().sessions
+}
