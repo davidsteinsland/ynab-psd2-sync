@@ -7,10 +7,10 @@ Gratis for personlig bruk. Støtter alle norske banker inkl. Sparebanken Norge.
 ## Daglig sync 
 
 ```
-YNAB_EB_STATE_FILE=~/.ynab-enablebanking.json op run --env-file=enablebanking/.env -- ./gradlew :enablebanking:run
-YNAB_EB_STATE_FILE=~/.ynab-enablebanking-ida.json op run --env-file=enablebanking/.env -- ./gradlew :enablebanking:run
+YNAB_EB_STATE_FILE=~/.ynab-enablebanking.json op run --env-file=.env -- ./gradlew run
+YNAB_EB_STATE_FILE=~/.ynab-enablebanking-ida.json op run --env-file=.env -- ./gradlew run
 
-op run --env-file=enablebanking/.env -- ./gradlew :enablebanking:run --args="--sync-ynab"
+op run --env-file=.env -- ./gradlew run --args="--sync-ynab"
 ```
 
 ## Oppsett
@@ -26,7 +26,7 @@ op run --env-file=enablebanking/.env -- ./gradlew :enablebanking:run --args="--s
 4. Finn ASPSP-navnet for banken din:
 
    ```sh
-   op run --env-file=.env -- ./gradlew :enablebanking:run --args="--list-aspsps"
+   op run --env-file=.env -- ./gradlew run --args="--list-aspsps"
    ```
 
 5. Start samtykke (180 dagers tilgang):
