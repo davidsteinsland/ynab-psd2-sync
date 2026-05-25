@@ -57,9 +57,8 @@ private fun run(args: List<String>) {
     val applicationId = env("ENABLEBANKING_APPLICATION_ID")
     val client = EnableBankingClient(applicationId, env("ENABLEBANKING_PRIVATE_KEY"), objectMapper)
 
-    val defaultStateStoreFile = File(System.getProperty("user.home"), ".ynab-enablebanking.json")
-    val userProvidedStateStoreFile = System.getenv("YNAB_EB_STATE_FILE")?.let { File(it) }
-    val stateStore = StateStore(userProvidedStateStoreFile ?: defaultStateStoreFile, objectMapper)
+    val stateFile = parseFlag(args, "--state")?.let { File(it) } ?: File(".state.json")
+    val stateStore = StateStore(stateFile, objectMapper)
 
     val mappingsFile = parseFlag(args, "--mappings")?.let { File(it) } ?: File(".ynab.json")
     val mappingsStore = YnabMappingsStore(mappingsFile, objectMapper)

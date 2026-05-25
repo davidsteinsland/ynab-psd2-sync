@@ -2,15 +2,18 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: op run --env-file=enablebanking/.env -- ./http-test" >&2
+  echo "Usage: op run --env-file=.env -- ./http-test [state-fil]" >&2
   echo "" >&2
+  echo "state-fil default: .state.json" >&2
   echo "Krever miljøvariabler ENABLEBANKING_APPLICATION_ID og ENABLEBANKING_PRIVATE_KEY" >&2
   exit 1
 }
 
 APP_ID="${ENABLEBANKING_APPLICATION_ID:-}"
 PEM="${ENABLEBANKING_PRIVATE_KEY:-}"
+STATE_FILE="${1:-.state.json}"
 [[ -z "$APP_ID" || -z "$PEM" ]] && usage
+[[ ! -f "$STATE_FILE" ]] && { echo "State-fil ikke funnet: $STATE_FILE" >&2; exit 1; }
 now=$(date +%s)
 exp=$((now+3600))
 

@@ -7,8 +7,8 @@ Gratis for personlig bruk. Støtter alle norske banker inkl. Sparebanken Norge.
 ## Daglig sync 
 
 ```
-YNAB_EB_STATE_FILE=~/.ynab-enablebanking.json op run --env-file=.env -- ./gradlew run
-YNAB_EB_STATE_FILE=~/.ynab-enablebanking-ida.json op run --env-file=.env -- ./gradlew run
+op run --env-file=.env -- ./gradlew run --args="--state .state.json"
+op run --env-file=.env -- ./gradlew run --args="--state .state-ida.json"
 
 op run --env-file=.env -- ./gradlew run --args="--sync-ynab"
 ```
@@ -36,9 +36,9 @@ op run --env-file=.env -- ./gradlew run --args="--sync-ynab"
    ```
 
    Du får en URL → logg inn med BankID → lim inn redirect-URL-en tilbake i
-   terminalen. Sesjons-ID lagres i `~/.ynab-enablebanking.json` (overstyr med
-   miljøvariabelen `YNAB_EB_STATE_FILE` hvis flere brukere deler maskinen og
-   skal ha hver sin sesjon).
+   terminalen. Sesjons-ID lagres i `.state.json` (overstyr med `--state <fil>`
+   hvis flere brukere deler maskinen og skal ha hver sin sesjon, f.eks.
+   `--state .state-ida.json`). State-filer ligger i repoet men er gitignorert.
 
 6. Hent transaksjoner (siste 7 dager):
 

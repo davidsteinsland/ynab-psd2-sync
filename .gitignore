@@ -1,5 +1,7 @@
 .env
 .ynab.json
+.state.json
+.state*.json
 extracted/
 .gradle
 build
