@@ -27,13 +27,11 @@ internal val log = LoggerFactory.getLogger("enablebanking.Main")
  *
  * Bruk:
  *   ./gradlew :enablebanking:run --args="--list-aspsps"
+ *   ./gradlew :enablebanking:run --args="--list-sessions"
  *   ./gradlew :enablebanking:run --args="--init"
  *   ./gradlew :enablebanking:run --args="--map-accounts"      # mapper EB-kontoer til YNAB-kontoer
- *   ./gradlew :enablebanking:run                              # henter siste 90 dager (kun CSV)
- *   ./gradlew :enablebanking:run --args="--push"              # henter og pusher til YNAB
- *   ./gradlew :enablebanking:run --args="--push --push-from 2026-05-15"
- *   ./gradlew :enablebanking:run --args="--push-from-cache"
- *   ./gradlew :enablebanking:run --args="--push-from-cache --push-from 2026-05-15"
+ *   ./gradlew :enablebanking:run                              # henter siste 7 dager
+ *   ./gradlew :enablebanking:run --args="--sync-ynab"         # syncer til YNAB
  */
 fun main(args: Array<String>) {
     try {
