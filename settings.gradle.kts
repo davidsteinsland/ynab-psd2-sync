@@ -1,1 +1,1 @@
-rootProject.name = "YNAB Sync"
+rootProject.name = "ynab-psd2-sync"

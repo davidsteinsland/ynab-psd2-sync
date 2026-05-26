@@ -18,8 +18,12 @@ internal val log = LoggerFactory.getLogger("enablebanking.Main")
 /**
  * Miljøvariabler:
  *   ENABLEBANKING_APPLICATION_ID - applikasjons-ID (UUID) fra https://enablebanking.com/cp/applications
- *   ENABLEBANKING_PRIVATE_KEY - PEM-innhold (selve nøkkelen, ikke en filsti) lastet ned ved opprettelse av appen
- *   YNAB_ACCESS_TOKEN - Personal Access Token fra app.ynab.com (kun nødvendig for --map-accounts og --push)
+ *   ENABLEBANKING_PRIVATE_KEY    - PEM-innhold (selve nøkkelen, ikke en filsti) lastet ned ved opprettelse av appen
+ *   YNAB_ACCESS_TOKEN            - Personal Access Token fra app.ynab.com (kun nødvendig for --map-accounts og --sync-ynab)
+ *
+ * Hemmeligheter støtter også `_FILE`-suffix (Docker-konvensjon), som leser verdien fra fila:
+ *   ENABLEBANKING_PRIVATE_KEY_FILE=/run/secrets/eb-private-key.pem
+ *   YNAB_ACCESS_TOKEN_FILE=/run/secrets/ynab-token
  *
  * Bruk:
  *   ./gradlew :enablebanking:run --args="--list-aspsps"
@@ -55,7 +59,7 @@ private fun run(args: List<String>) {
         .build()
 
     val applicationId = env("ENABLEBANKING_APPLICATION_ID")
-    val client = EnableBankingClient(applicationId, env("ENABLEBANKING_PRIVATE_KEY"), objectMapper)
+    val client = EnableBankingClient(applicationId, secret("ENABLEBANKING_PRIVATE_KEY"), objectMapper)
 
     val stateFile = parseFlag(args, "--state")?.let { File(it) } ?: File(".state.json")
     val stateStore = StateStore(stateFile, objectMapper)
@@ -63,7 +67,7 @@ private fun run(args: List<String>) {
     val mappingsFile = parseFlag(args, "--mappings")?.let { File(it) } ?: File(".ynab.json")
     val mappingsStore = YnabMappingsStore(mappingsFile, objectMapper)
 
-    val ynabClient by lazy { YnabClient(env("YNAB_ACCESS_TOKEN"), objectMapper) }
+    val ynabClient by lazy { YnabClient(secret("YNAB_ACCESS_TOKEN"), objectMapper) }
 
     val cmd = when {
         "--list-aspsps" in args -> ListAspsps(client)
@@ -111,6 +115,21 @@ sealed interface AccountNumber {
 
 private fun env(name: String) = System.getenv(name)
     ?: error("Miljøvariabel $name må være satt")
+
+/**
+ * Leser en hemmelighet. Hvis `<NAME>_FILE` er satt, leses verdien fra fila
+ * (newlines i slutten trimmes). Ellers brukes `<NAME>` direkte. Dette følger
+ * Docker `_FILE`-konvensjonen og lar oss montere PEM-nøkler og tokens som filer
+ * i stedet for å legge dem i env-variabler.
+ */
+private fun secret(name: String): String {
+    System.getenv("${name}_FILE")?.let { path ->
+        val file = File(path)
+        check(file.isFile) { "Filsti i ${name}_FILE finnes ikke: $path" }
+        return file.readText().trimEnd('\n', '\r')
+    }
+    return env(name)
+}
 
 internal data class RootState(
     val sessions: List<SessionState> = emptyList(),
