@@ -75,7 +75,7 @@ internal class InitSessions(val client: EnableBankingClient, val stateStore: Sta
                     sessionId = sessionId,
                     aspspName = aspspName,
                     aspspCountry = aspspCountry,
-                    validUntil = validUntil.toString(),
+                    validUntil = validUntil,
                     accounts = cachedAccounts,
                 )
         stateStore.saveRoot(root.copy(sessions = sessions))

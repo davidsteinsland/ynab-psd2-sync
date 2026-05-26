@@ -9,6 +9,7 @@ internal class FetchTransactions(
     val stateStore: StateStore,
     val mappingsStore: YnabMappingsStore,
     val objectMapper: ObjectMapper,
+    val expiryNotifier: SessionExpiryNotifier,
 ): Command {
     override fun run() {
         val fetchTransactionsFrom = LocalDate.now().minusDays(7)
@@ -16,6 +17,8 @@ internal class FetchTransactions(
 
         val root = stateStore.loadRoot()
         if (root.sessions.isEmpty()) error("Ingen lagrede sesjoner. Kjør med --init først.")
+
+        expiryNotifier.check(root.sessions)
 
         val mappedUids = mappingsStore.loadOrNull()?.mappings?.map { it.accountUid }?.toSet().orEmpty()
         if (mappedUids.isEmpty()) {
@@ -25,6 +28,7 @@ internal class FetchTransactions(
 
         val extractedDir = File("extracted").also { it.mkdirs() }
 
+        val failures = mutableListOf<String>()
         root.sessions.forEach { sessionState ->
             log.info("Henter fra {} (sesjon {})", sessionState.aspspName, sessionState.sessionId)
             try {
@@ -39,7 +43,11 @@ internal class FetchTransactions(
                 )
             } catch (e: Exception) {
                 log.error("Feil for {}: {}", sessionState.aspspName, e.message, e)
+                failures += "${sessionState.aspspName}: ${e.message}"
             }
+        }
+        if (failures.isNotEmpty()) {
+            error("Feil under henting for ${failures.size} sesjon(er): ${failures.joinToString("; ")}")
         }
     }
 }

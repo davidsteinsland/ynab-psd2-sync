@@ -12,6 +12,7 @@ import tools.jackson.module.kotlin.jacksonMapperBuilder
 import tools.jackson.module.kotlin.readValue
 import java.io.File
 import kotlin.system.exitProcess
+import java.time.Instant
 
 internal val log = LoggerFactory.getLogger("enablebanking.Main")
 
@@ -67,6 +68,11 @@ private fun run(args: List<String>) {
 
     val ynabClient by lazy { YnabClient(secret("YNAB_ACCESS_TOKEN"), objectMapper) }
 
+    val expiryNotifier = SessionExpiryNotifier(
+        ntfyTopic = System.getenv("NTFY_TOPIC").orEmpty(),
+        warningDays = System.getenv("SESSION_EXPIRY_WARNING_DAYS")?.toLongOrNull() ?: 14L,
+    )
+
     val cmd = when {
         "--list-aspsps" in args -> ListAspsps(client)
         "--list-sessions" in args -> ListSessions(client, stateStore)
@@ -78,7 +84,7 @@ private fun run(args: List<String>) {
         "--init" in args -> InitSessions(client, stateStore)
         "--map-accounts" in args -> MapAccounts(ynabClient, mappingsStore, objectMapper)
         "--sync-ynab" in args -> SyncToYnab(ynabClient, mappingsStore, objectMapper)
-        else -> FetchTransactions(client, stateStore, mappingsStore, objectMapper)
+        else -> FetchTransactions(client, stateStore, mappingsStore, objectMapper, expiryNotifier)
     }
     cmd.run()
 }
@@ -137,7 +143,7 @@ internal data class SessionState(
     val sessionId: String,
     val aspspName: String,
     val aspspCountry: String,
-    val validUntil: String? = null,
+    val validUntil: Instant,
     val accounts: List<CachedAccount> = emptyList(),
 )
 
