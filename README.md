@@ -3,15 +3,57 @@
 Henter banktransaksjoner via [Enable Banking API](https://enablebanking.com/docs/).
 Gratis for personlig bruk. Støtter alle norske banker inkl. Sparebanken Norge.
 
-
 ## Daglig sync 
 
+Jeg bruker 1Passwords `op` slik at hemmeligheter ikke ligger som filer på disk:
 ```
 op run --env-file=.env -- ./gradlew run --args="--state .state.json"
-op run --env-file=.env -- ./gradlew run --args="--state .state-ida.json"
+op run --env-file=.env -- ./gradlew run --args="--state .state-person2.json"
+```
 
+Ting lastes opp til YNAB etterpå i eget steg, etter at man har hentet transaksjoner man trenger:
+```
 op run --env-file=.env -- ./gradlew run --args="--sync-ynab"
 ```
+
+## Varsling ved utløpt / snart utløpt samtykke
+
+Bruk tjenesten [ntfy.sh](https://ntfy.sh/) for å sende push-varsler til telefonen når samtykke må fornyes (etter 180 dager).
+Sett da miljøvariabelen `NTFY_TOPIC` i `.env`-filen.
+
+## Tips
+
+Kjør sync-jobbene jevnlig med f.eks. `systemd` på Linux, med helsesjekk-rapportering til [HealthChecks.io](https://healthchecks.io/)
+
+```
+# psd2-sync.service
+[Unit]
+Description=PSD2 sync: fetch transactions
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/var/docker-services/ynab-psd2-sync
+ExecStart=./gradlew --state .state.json
+ExecStartPost=/usr/bin/curl -fsS --retry 3 --max-time 10 https://hc-ping.com/randomuuid
+TimeoutStartSec=10min
+
+# psd2-sync.timer
+[Unit]
+Description=PSD2 sync: fetch transactions (twice on weekdays)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 07:00:00
+OnCalendar=Mon..Fri *-*-* 14:00:00
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+... og en tilsvarende for push til YNAB.
 
 ## Oppsett
 
@@ -38,15 +80,17 @@ op run --env-file=.env -- ./gradlew run --args="--sync-ynab"
    Du får en URL → logg inn med BankID → lim inn redirect-URL-en tilbake i
    terminalen. Sesjons-ID lagres i `.state.json` (overstyr med `--state <fil>`
    hvis flere brukere deler maskinen og skal ha hver sin sesjon, f.eks.
-   `--state .state-ida.json`). State-filer ligger i repoet men er gitignorert.
+   `--state .state-person2.json`). State-filer blir ignorert via `.gitignore`.
 
 6. Hent transaksjoner (siste 7 dager):
 
    ```sh
    op run --env-file=.env -- ./gradlew run
    ```
+   
+   Angi en annen statefil via argument: `--args="--state .state-person2.json"` til `gradlew`-kommandoen over.
 
-   Resultat:
+   Det vil bli produsert json-filer i `extracted`-mappa for hver konto:
    - `extracted/<konto-uuid>.json`
 
 ## Push direkte til YNAB
@@ -61,7 +105,10 @@ op run --env-file=.env -- ./gradlew run --args="--sync-ynab"
    ```
 
    Mapping og budsjett-ID lagres i `.ynab.json`. Re-init beholder
-   eksisterende mapping. Kjør `--map-accounts` på nytt for å legge til nye kontoer.
+   eksisterende mapping. 
+
+   Viktig: Kjør `--map-accounts` på nytt for å legge til nye kontoer.
+   YNAB-mappingen er felles for alle state-filer fordi det er en antagelse at alle transaksjoner skal pushes til samme YNAB-budsjett.
 
 3. Push til YNAB:
 
