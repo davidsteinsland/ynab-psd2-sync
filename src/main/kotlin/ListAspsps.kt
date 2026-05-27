@@ -1,4 +1,4 @@
-package com.github.davidsteinsland.ynab_psd2_sync.enablebanking
+package com.github.davidsteinsland.ynab_psd2_sync
 
 import java.time.Duration
 

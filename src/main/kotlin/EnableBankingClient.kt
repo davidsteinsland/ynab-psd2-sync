@@ -1,4 +1,4 @@
-package com.github.davidsteinsland.ynab_psd2_sync.enablebanking
+package com.github.davidsteinsland.ynab_psd2_sync
 
 import org.slf4j.LoggerFactory
 import tools.jackson.databind.JsonNode

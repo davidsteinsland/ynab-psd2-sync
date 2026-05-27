@@ -1,4 +1,4 @@
-package com.github.davidsteinsland.ynab_psd2_sync.enablebanking
+package com.github.davidsteinsland.ynab_psd2_sync
 
 internal class RemoveSession(val stateStore: StateStore, val name: String): Command {
     override fun run() {

@@ -1,4 +1,4 @@
-package com.github.davidsteinsland.ynab_psd2_sync.enablebanking
+package com.github.davidsteinsland.ynab_psd2_sync
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonSubTypes
@@ -14,7 +14,7 @@ import java.io.File
 import kotlin.system.exitProcess
 import java.time.Instant
 
-internal val log = LoggerFactory.getLogger("enablebanking.Main")
+internal val log = LoggerFactory.getLogger("Main")
 
 /**
  * Miljøvariabler:
@@ -27,12 +27,12 @@ internal val log = LoggerFactory.getLogger("enablebanking.Main")
  *   YNAB_ACCESS_TOKEN_FILE=/run/secrets/ynab-token
  *
  * Bruk:
- *   ./gradlew :enablebanking:run --args="--list-aspsps"
- *   ./gradlew :enablebanking:run --args="--list-sessions"
- *   ./gradlew :enablebanking:run --args="--init"
- *   ./gradlew :enablebanking:run --args="--map-accounts"      # mapper EB-kontoer til YNAB-kontoer
- *   ./gradlew :enablebanking:run                              # henter siste 7 dager
- *   ./gradlew :enablebanking:run --args="--sync-ynab"         # syncer til YNAB
+ *   ./gradlew :run --args="--list-aspsps"
+ *   ./gradlew :run --args="--list-sessions"
+ *   ./gradlew :run --args="--init"
+ *   ./gradlew :run --args="--map-accounts"      # mapper EB-kontoer til YNAB-kontoer
+ *   ./gradlew :run                              # henter siste 7 dager
+ *   ./gradlew :run --args="--sync-ynab"         # syncer til YNAB
  */
 fun main(args: Array<String>) {
     try {

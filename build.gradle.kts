@@ -18,7 +18,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("com.github.davidsteinsland.ynab_psd2_sync.enablebanking.MainKt")
+    mainClass.set("com.github.davidsteinsland.ynab_psd2_sync.MainKt")
 }
 
 repositories {
