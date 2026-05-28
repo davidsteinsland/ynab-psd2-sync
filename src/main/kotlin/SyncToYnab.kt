@@ -161,16 +161,11 @@ private fun pushTilYnab(
         .path("transaction_ids")
         .values()
         .map {
-            val importId = transactionsById.getValue(it.asString()).path("importId").asString()
+            val importId = transactionsById.getValue(it.asString()).path("import_id").asString()
             parsed.single { it.importId == importId}
         }
 
     val duplicates = data.path("duplicate_import_ids").size()
-    log.info("  Pushet {} nye, {} duplikater hoppet over, {} hoppet over (pending/før pushFrom)", created, duplicates, skipped)
+    log.info("  Pushet {} nye, {} duplikater hoppet over, {} hoppet over (pending/før pushFrom)", created.size, duplicates, skipped)
     return created
 }
-
-data class NewTransaction(
-    val transactionId: String,
-    val importId: String
-)
