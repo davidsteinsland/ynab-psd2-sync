@@ -52,6 +52,7 @@ internal class SyncToYnab(
         if (perAccount.isEmpty()) return
 
         val total = perAccount.sumOf { it.second }
+        if (total == 0) return
         val title = "$total nye transaksjoner syncet"
         val body = perAccount
             .filter { it.second > 0 }
