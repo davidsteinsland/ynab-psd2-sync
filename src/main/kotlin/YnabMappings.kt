@@ -24,6 +24,10 @@ internal data class AccountMapping(
     val ynabTransferPayeeId: String?,
     /** Valgfri etikett til menneskelig lesbarhet. */
     val label: String? = null,
+    /** vå varsel via ntfy.sh dersom det kommer penger inn på konto */
+    val monitorInflow: Boolean = false,
+    /** Navn som vises i ntfy-varsler. Fallback til primaryAccountNumber hvis ikke satt. */
+    val notificationName: String? = null,
 )
 
 internal class YnabMappingsStore(private val file: File, private val objectMapper: ObjectMapper) {

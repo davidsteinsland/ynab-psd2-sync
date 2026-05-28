@@ -71,12 +71,23 @@ internal class MapAccounts(
                 ynabAccounts.singleOrNull { it.path("id").asString() == prior.ynabAccountId } ?: return@mapNotNull prior
             }
 
+            print("Vil du overvåke/få varsel når det kommer penger inn på konto? [y/N]")
+            val monitorInflow = readln().trim().lowercase() in listOf("y", "yes")
+            val notificationName = if (monitorInflow) {
+                val default = prior?.notificationName ?: eb.primaryAccountNumber
+                print("Visningsnavn i varsler [$default]: ")
+                readln().trim().ifBlank { default }
+            } else {
+                prior?.notificationName
+            }
             AccountMapping(
                 accountUid = eb.uid,
                 primaryAccountNumber = eb.primaryAccountNumber,
                 ynabAccountId = ynabAcc.path("id").asString(),
                 ynabTransferPayeeId = ynabAcc.path("transfer_payee_id").stringValue(),
                 label = "${eb.aspsp} – ${eb.name.ifBlank { eb.primaryAccountNumber }}",
+                monitorInflow = monitorInflow,
+                notificationName = notificationName,
             )
         }
 
