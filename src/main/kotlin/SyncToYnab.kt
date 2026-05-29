@@ -39,12 +39,8 @@ internal class SyncToYnab(
                 return@forEach
             }
             val transactions = objectMapper.readTree(file).path("transactions").toList()
-            try {
-                val created = pushTilYnab(ynab, budgetId, mapping, transactions, transferPayees)
-                perAccount += mapping.primaryAccountNumber to created
-            } catch (e: Exception) {
-                log.error("  YNAB-push feilet: {}", e.message, e)
-            }
+            val created = pushTilYnab(ynab, budgetId, mapping, transactions, transferPayees)
+            perAccount += mapping.primaryAccountNumber to created
         }
 
         notifyNtfy(mappings, perAccount)
@@ -103,19 +99,15 @@ internal class SyncToYnab(
     }
 
     private fun notify(title: String, tags: List<String>, body: String) {
-        try {
-            val req = HttpRequest.newBuilder()
-                .uri(URI.create("https://ntfy.sh/$ntfyTopic"))
-                .header("Title", title)
-                .header("Tags", tags.joinToString(","))
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build()
-            val resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding())
-            if (resp.statusCode() !in 200..299) {
-                log.warn("ntfy svarte med {} for sync-varsel", resp.statusCode())
-            }
-        } catch (e: Exception) {
-            log.warn("Klarte ikke å sende ntfy sync-varsel: {}", e.message)
+        val req = HttpRequest.newBuilder()
+            .uri(URI.create("https://ntfy.sh/$ntfyTopic"))
+            .header("Title", title)
+            .header("Tags", tags.joinToString(","))
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build()
+        val resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding())
+        if (resp.statusCode() !in 200..299) {
+            error("ntfy svarte med ${resp.statusCode()} for sync-varsel")
         }
     }
 }
