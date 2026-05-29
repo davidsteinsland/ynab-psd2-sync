@@ -75,8 +75,8 @@ internal class SyncToYnab(
                     ?.filter { it.signedAmount > 0 }
                     // ikke bry oss om interne overføringer
                     ?.filter { it.transferPayeeId == null }
-                    // bare bry oss om dagens dato
-                    ?.filter { it.date == today }
+                    // bare bry oss om ferske transaksjoner (fanger settlement-lag fra banken)
+                    ?.filter { it.date >= today.minusDays(2) }
                     ?.let { inflows ->
                         (ynabAccount.notificationName ?: ynabAccount.primaryAccountNumber) to inflows
                     }
@@ -88,7 +88,7 @@ internal class SyncToYnab(
             minimumFractionDigits = 0
         }
         val totalInflow = accountsWithInflow.sumOf { it.second.sumOf { it.signedAmount } }
-        val title = "${numberFormat.format(totalInflow)} inn på konto i dag"
+        val title = "${numberFormat.format(totalInflow)} inn på konto"
         val body = accountsWithInflow.joinToString(separator = "\n\n") { (label, amount) ->
             """
                 $label:
