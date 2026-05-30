@@ -8,6 +8,7 @@ import tools.jackson.core.util.DefaultIndenter
 import tools.jackson.core.util.DefaultPrettyPrinter
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.convertValue
 import tools.jackson.module.kotlin.jacksonMapperBuilder
 import tools.jackson.module.kotlin.readValue
 import java.io.File
@@ -68,8 +69,10 @@ private fun run(args: List<String>) {
 
     val ynabClient by lazy { YnabClient(secret("YNAB_ACCESS_TOKEN"), objectMapper) }
 
+    val ntfyClient = System.getenv("NTFY_TOPIC").takeUnless { it.isNullOrBlank() }?.let { NtfyClient(topic = it, objectMapper) }
+
     val expiryNotifier = SessionExpiryNotifier(
-        ntfyTopic = System.getenv("NTFY_TOPIC").orEmpty(),
+        ntfyClient = ntfyClient,
         warningDays = System.getenv("SESSION_EXPIRY_WARNING_DAYS")?.toLongOrNull() ?: 14L,
     )
 
@@ -83,8 +86,15 @@ private fun run(args: List<String>) {
         }
         "--init" in args -> InitSessions(client, stateStore)
         "--map-accounts" in args -> MapAccounts(ynabClient, mappingsStore, objectMapper)
-        "--sync-ynab" in args -> SyncToYnab(ynabClient, mappingsStore, objectMapper)
-        else -> FetchTransactions(client, stateStore, mappingsStore, objectMapper, expiryNotifier)
+        "--sync-ynab" in args -> SyncToYnab(ynabClient, mappingsStore, objectMapper, ntfyClient)
+        else -> FetchTransactions(
+            client = client,
+            stateStore = stateStore,
+            mappingsStore = mappingsStore,
+            objectMapper = objectMapper,
+            expiryNotifier = expiryNotifier,
+            ntfyClient = ntfyClient,
+        )
     }
     cmd.run()
 }
@@ -154,7 +164,7 @@ internal data class CachedAccount(
     val name: String,
     val product: String,
     val cashAccountType: String? = null,
-    val details: JsonNode? = null,
+    val details: JsonNode
 ) {
     init {
         check(accountNumbers.isNotEmpty()) {

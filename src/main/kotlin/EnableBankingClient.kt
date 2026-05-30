@@ -1,8 +1,10 @@
 package com.github.davidsteinsland.ynab_psd2_sync
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import org.slf4j.LoggerFactory
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.convertValue
 import java.net.URI
 import java.net.URLEncoder
 import java.net.http.HttpClient
@@ -10,12 +12,12 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.security.KeyFactory
+import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Instant
 import java.time.LocalDate
 import java.util.Base64
-import kotlin.jvm.optionals.getOrNull
 
 /**
  * Klient for Enable Banking API.
@@ -121,9 +123,10 @@ class EnableBankingClient(
                 if (dateTo != null) add("date_to=$dateTo")
                 if (continuationKey != null) add("continuation_key=${URLEncoder.encode(continuationKey, StandardCharsets.UTF_8)}")
             }.joinToString("&")
-            val page = request("GET", "/accounts/$accountUid/transactions?$params", psuHeaders = defaultPsuHeaders())
-            page.path("transactions").forEach { all.add(it) }
-            continuationKey = page.path("continuation_key").asStringOpt()?.getOrNull()
+            val response = request("GET", "/accounts/$accountUid/transactions?$params", psuHeaders = defaultPsuHeaders())
+            val page = objectMapper.convertValue<TransactionResponse>(response)
+            page.transactions.forEach { all.add(it) }
+            continuationKey = page.continuationKey
         } while (continuationKey != null)
         return all
     }
@@ -176,4 +179,129 @@ class EnableBankingClient(
         }
         return objectMapper.readTree(response.body())
     }
+}
+
+private data class TransactionResponse(
+    val transactions: List<JsonNode>,
+    @param:JsonProperty("continuation_key")
+    val continuationKey: String?
+)
+
+data class TransactionDto(
+    @param:JsonProperty("entry_reference")
+    val entryReference: String?,
+    @param:JsonProperty("transaction_amount")
+    val transactionAmount: AmountDto,
+    val creditor: CreditorDto?,
+    @param:JsonProperty("creditor_account")
+    val creditorAccount: CreditorAccountDto?,
+    val debtor: DebtorDto?,
+    @param:JsonProperty("debtor_account")
+    val debtorAccount: DebtorAccountDto?,
+    @param:JsonProperty("bank_transaction_code")
+    val bankTransactionCode: BankTransactionCodeDto?,
+    @param:JsonProperty("credit_debit_indicator")
+    val creditDebitIndicator: CreditDebitIndicatorDto,
+    val status: StatusDto,
+    @param:JsonProperty("booking_date")
+    val bookingDate: LocalDate?,
+    @param:JsonProperty("value_date")
+    val valueDate: LocalDate?,
+    @param:JsonProperty("transaction_date")
+    val transactionDate: LocalDate?,
+    @param:JsonProperty("remittance_information")
+    val remittanceInformation: List<String>
+) {
+    val counterpartyName = when (creditDebitIndicator) {
+        CreditDebitIndicatorDto.DBIT -> creditor?.name
+        CreditDebitIndicatorDto.CRDT -> debtor?.name
+    }?.takeUnless { it.isBlank() }
+
+    val counterpartyAccount = when (creditDebitIndicator) {
+        CreditDebitIndicatorDto.DBIT -> creditorAccount?.other
+        CreditDebitIndicatorDto.CRDT -> debtorAccount?.other
+    }
+
+    // ingen universell unikhet
+    val fingerprint = createFingerprint(
+        entryReference = entryReference,
+        transactionAmount = transactionAmount,
+        counterpartyName = counterpartyName,
+        counterpartyAccount = counterpartyAccount,
+        bookingDate = bookingDate,
+        valueDate = valueDate,
+        transactionDate = transactionDate
+    )
+}
+
+private fun createFingerprint(
+    entryReference: String?,
+    transactionAmount: AmountDto,
+    counterpartyName: String?,
+    counterpartyAccount: AccountDto?,
+    bookingDate: LocalDate?,
+    valueDate: LocalDate?,
+    transactionDate: LocalDate?
+): String {
+    // har sett tilfeller hvor entryReference "0" og "21" har blitt brukt på flere transaksjoner,
+    // derfor er beste løsning å lage egen fingerprint basert på flere felter
+    val payload = listOfNotNull(
+        entryReference,
+        bookingDate,
+        valueDate,
+        transactionDate,
+        transactionAmount.amount,
+        counterpartyName,
+        counterpartyAccount?.identification
+    ).joinToString("|")
+    val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+    val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+    return ("EBH:$b64")
+}
+
+enum class StatusDto {
+    BOOK, PDNG
+}
+
+enum class CreditDebitIndicatorDto {
+    DBIT, CRDT
+}
+
+data class BankTransactionCodeDto(
+    val code: String?
+)
+
+data class AmountDto(
+    val currency: String,
+    val amount: String,
+) {
+    val amountAsDouble = amount.toDoubleOrNull()
+}
+
+data class CreditorDto(
+    val name: String
+)
+
+data class CreditorAccountDto(
+    val iban: String?,
+    val other: AccountDto
+)
+
+data class DebtorDto(
+    val name: String
+)
+
+data class DebtorAccountDto(
+    val iban: String?,
+    val other: AccountDto
+)
+
+data class AccountDto(
+    val identification: String,
+    @param:JsonProperty("scheme_name")
+    val schemeName: SchemeDto,
+)
+
+enum class SchemeDto {
+    IBAN, BBAN, CPAN
 }

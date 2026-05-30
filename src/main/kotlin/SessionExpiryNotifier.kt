@@ -12,12 +12,11 @@ import java.time.temporal.ChronoUnit
  * Sjekker hver sesjons `validUntil` og sender et ntfy-varsel hvis det er færre enn
  * [warningDays] dager igjen. Brukes til å minne om at PSD2-samtykket (180 dager) snart utløper.
  *
- * Skipper varslingen stille hvis [ntfyTopic] er tom — da brukes kun logging.
+ * Skipper varslingen stille hvis [ntfyClient] er null — da brukes kun logging.
  */
 internal class SessionExpiryNotifier(
-    private val ntfyTopic: String,
+    private val ntfyClient: NtfyClient?,
     private val warningDays: Long,
-    private val httpClient: HttpClient = HttpClient.newHttpClient(),
 ) {
     private val log = LoggerFactory.getLogger(SessionExpiryNotifier::class.java)
 
@@ -40,22 +39,11 @@ internal class SessionExpiryNotifier(
             "Sesjon for ${session.aspspName} (${session.aspspCountry}) utløper om $daysLeft dager. Kjør --init før den ryker."
         }
         log.warn(msg)
-        if (ntfyTopic.isBlank()) return
-
-        try {
-            val req = HttpRequest.newBuilder()
-                .uri(URI.create("https://ntfy.sh/$ntfyTopic"))
-                .header("Title", if (expired) "❌ Bank-sesjon utløpt" else "⚠️ Bank-sesjon utløper snart")
-                .header("Priority", if (expired) "high" else "default")
-                .header("Tags", "warning,bank")
-                .POST(HttpRequest.BodyPublishers.ofString(msg))
-                .build()
-            val resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding())
-            if (resp.statusCode() !in 200..299) {
-                log.warn("ntfy svarte med {} for varsel om {}", resp.statusCode(), session.aspspName)
-            }
-        } catch (e: Exception) {
-            log.warn("Klarte ikke å sende ntfy-varsel for {}: {}", session.aspspName, e.message)
-        }
+        ntfyClient?.notify(
+            title = if (expired) "❌ Bank-sesjon utløpt" else "⚠️ Bank-sesjon utløper snart",
+            tags = listOf("warning","bank"),
+            body = msg,
+            priority = if (expired) NtfyClient.Priority.HIGH else NtfyClient.Priority.DEFAULT,
+        )
     }
 }

@@ -1,10 +1,8 @@
 package com.github.davidsteinsland.ynab_psd2_sync
 
-import tools.jackson.databind.JsonNode
 import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.Base64
-import kotlin.jvm.optionals.getOrNull
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -22,15 +20,12 @@ internal data class Transaksjon(
     val transferPayeeId: String?,
     /** Visningsnavn på motpart: creditor/debtor `name` med BBAN som fallback. */
     val payee: String?,
-    /** Rå BBAN/identifikasjon fra creditor_account/debtor_account.other.identification. */
-    val counterpartyBban: String?,
     val memo: String,
     val booked: Boolean,
-    val entryReference: String?,
+    val fingerprint: String,
+    val occurrence: Int = 1
 ) {
     val milliunits = (signedAmount * 1000.0).roundToLong()
-    val importId = entryReference?.let(::importIdFromEntryReference)
-        ?: importIdFromContent(date, milliunits, payee, memo)
 
     /**
      * Returnerer null for pending – disse pushes ikke
@@ -43,6 +38,12 @@ internal data class Transaksjon(
      */
     fun tilYnabApi(accountId: String): Map<String, Any?>? {
         if (!booked) return null
+        // YNAB import_id må være <= 36 tegn
+        val importId = "$fingerprint:$occurrence".let { payload ->
+            val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+            val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+            b64.take(36)
+        }
         return mapOf(
             "account_id" to accountId,
             "date" to date.toString(),
@@ -59,100 +60,59 @@ internal data class Transaksjon(
 
     companion object {
         /** Parser node fra Enable Banking. Returnerer null om dato/beløp mangler. */
-        fun fromNode(
-            node: JsonNode,
+        fun fromDto(
+            node: TransactionDto,
             transferPayees: Map<String, String>
         ): Transaksjon? {
-            val possibleDates = listOfNotNull(
-                node.path("booking_date").stringValue(),
-                node.path("transaction_date").stringValue(),
-                node.path("value_date").stringValue(),
-            )
-            val dateStr = possibleDates.minOrNull() ?: return null
+            val possibleDates = listOfNotNull(node.bookingDate, node.valueDate, node.transactionDate)
+            val date = possibleDates.minOrNull() ?: return null
 
-            val amount = node.path("transaction_amount").path("amount").asString().toDoubleOrNull() ?: return null
+            val amount = node.transactionAmount.amountAsDouble ?: return null
 
-            val amountAndCounterparty = when (val indicator = node.path("credit_debit_indicator").asString()) {
-                "DBIT" -> {
+            val (signedAmount, payee, counterpartyBban) = when (node.creditDebitIndicator) {
+                CreditDebitIndicatorDto.DBIT -> {
                     // penger går ut av konto
                     val signedAmount = -abs(amount)
-                    val counterpartyNode = node.path("creditor")
-                    val counterpartyAccount = node.path("creditor_account")
-                    AmountAndCounterparty(signedAmount, counterpartyNode, counterpartyAccount)
+                    Triple(signedAmount, node.creditor?.name, node.creditorAccount?.other?.identification)
                 }
-                "CRDT" -> {
+                CreditDebitIndicatorDto.CRDT -> {
                     // penger kommer inn på konto
                     val signedAmount = abs(amount)
-                    val counterpartyNode = node.path("debtor")
-                    val counterpartyAccount = node.path("debtor_account")
-                    AmountAndCounterparty(signedAmount, counterpartyNode, counterpartyAccount)
+                    Triple(signedAmount, node.debtor?.name, node.debtorAccount?.other?.identification)
                 }
-                else -> error("Ukjent credit indicator: $indicator")
             }
 
             // har sett tilfeller med banknorwegian at teksten "Cashback transfer" kommer to ganger
-            val memo = node.path("remittance_information")
-                .asArrayOpt()
-                .getOrNull()
-                ?.values()
-                ?.map(JsonNode::asString)
-                ?.distinct()
-                ?.joinToString(" ")
-                ?: ""
+            val memo = node.remittanceInformation
+                .distinct()
+                .joinToString(" ")
 
-            val status = node.path("status").asString().takeIf { it.isNotBlank() }
-            val isBooked = status == "BOOK"
+            val isBooked = node.status == StatusDto.BOOK
 
-            val transferPayeeId = amountAndCounterparty.counterpartyBban?.let { transferPayees[normalizeBban(it)] }
+            val transferPayeeId = counterpartyBban?.let { transferPayees[normalizeBban(it)] }
 
             return Transaksjon(
-                date = LocalDate.parse(dateStr),
-                signedAmount = amountAndCounterparty.signedAmount,
+                date = date,
+                signedAmount = signedAmount,
                 transferPayeeId = transferPayeeId,
-                payee = amountAndCounterparty.payee,
-                counterpartyBban = amountAndCounterparty.counterpartyBban,
+                payee = payee,
                 memo = memo,
                 booked = isBooked,
-                entryReference = node.path("entry_reference").stringValue()?.takeIf { it.isNotBlank() },
+                fingerprint = node.fingerprint,
             )
+        }
+
+        fun List<Transaksjon>.withOccurrenceCounter(): List<Transaksjon> {
+            val sorted = sortedByDescending { it.date }
+            return sorted.mapIndexed { index, tx ->
+                val similar = sorted
+                    .take(index)
+                    .count { it.fingerprint == tx.fingerprint }
+                tx.copy(occurrence = similar + 1)
+            }
         }
 
         /** Norske BBAN er 11 siffer; banker formaterer dem ulikt (mellomrom, punktum, dash). */
         fun normalizeBban(bban: String): String = bban.filter { it.isDigit() }
-
-        private fun JsonNode.textOrNullIfBlank(): String? = stringValueOpt()?.getOrNull()?.takeUnless { it.isBlank() }
-
-        /**
-         * YNAB import_id må være <= 36 tegn. Hvis entry_reference er kortere brukes den direkte
-         * (prefikset `EB:`), ellers SHA-256-hashes den til 33 tegn base64url + `EB:` prefiks (= 36).
-         */
-        private fun importIdFromEntryReference(entryReference: String): String {
-            val candidate = "EB:$entryReference"
-            if (candidate.length <= 36) return candidate
-            val digest = MessageDigest.getInstance("SHA-256").digest(entryReference.toByteArray(Charsets.UTF_8))
-            val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
-            return ("EB:$b64").take(36)
-        }
-
-        /**
-         * Stabil import-ID basert på transaksjonsinnhold. Brukes når ASPSP-en ikke gir
-         * `entry_reference`. Endrer seg ikke om transaksjonen flyttes i lista mellom hentinger,
-         * så lenge dato, beløp, payee og memo er uendret.
-         */
-        private fun importIdFromContent(date: LocalDate, milliunits: Long, payee: String?, memo: String?): String {
-            val payload = "$date|$milliunits|${payee.orEmpty()}|${memo.orEmpty()}"
-            val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
-            val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
-            return ("EBH:$b64").take(36)
-        }
-
-        private data class AmountAndCounterparty(
-            val signedAmount: Double,
-            val counterpartyNode: JsonNode,
-            val counterpartyAccount: JsonNode
-        ) {
-            val counterpartyBban = counterpartyAccount.path("other").path("identification").textOrNullIfBlank()
-            val payee = counterpartyNode.path("name").textOrNullIfBlank() ?: counterpartyBban
-        }
     }
 }

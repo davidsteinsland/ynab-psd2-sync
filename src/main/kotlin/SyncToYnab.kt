@@ -1,15 +1,9 @@
 package com.github.davidsteinsland.ynab_psd2_sync
 
-import tools.jackson.databind.JsonNode
+import com.github.davidsteinsland.ynab_psd2_sync.Transaksjon.Companion.withOccurrenceCounter
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.convertValue
 import java.io.File
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.text.NumberFormat
-import java.time.LocalDate
-import java.util.Locale
 
 /**
  * Pusher transaksjoner direkte fra `extracted/<uid>.json` til YNAB uten å treffe
@@ -19,8 +13,7 @@ internal class SyncToYnab(
     val ynab: YnabClient,
     val mappingsStore: YnabMappingsStore,
     val objectMapper: ObjectMapper,
-    private val ntfyTopic: String? = System.getenv("NTFY_TOPIC")?.takeUnless { it.isBlank() },
-    private val httpClient: HttpClient = HttpClient.newHttpClient(),
+    private val ntfyClient: NtfyClient?,
 ): Command {
     override fun run() {
         val mappings = mappingsStore.load()
@@ -30,7 +23,7 @@ internal class SyncToYnab(
         val extractedDir = File("extracted")
         if (!extractedDir.isDirectory) error("Mappa extracted/ finnes ikke")
 
-        val perAccount = mutableListOf<Pair<String, List<Transaksjon>>>()
+        val perAccount = mutableListOf<Pair<String, Int>>()
 
         mappings.mappings.forEach { mapping ->
             val file = File(extractedDir, "${mapping.accountUid}.json")
@@ -38,77 +31,26 @@ internal class SyncToYnab(
                 log.warn("Hopper over {} – fant ikke {}", mapping.label ?: mapping.primaryAccountNumber, file.path)
                 return@forEach
             }
-            val transactions = objectMapper.readTree(file).path("transactions").toList()
+            val transactions = objectMapper.convertValue<List<TransactionDto>>(objectMapper.readTree(file).path("transactions").toList())
             val created = pushTilYnab(ynab, budgetId, mapping, transactions, transferPayees)
             perAccount += mapping.primaryAccountNumber to created
         }
 
-        notifyNtfy(mappings, perAccount)
+        notifyNtfy(perAccount)
     }
 
-    private fun notifyNtfy(ynabMappings: YnabMappings, perAccount: List<Pair<String, List<Transaksjon>>>) {
-        if (ntfyTopic.isNullOrBlank()) return
+    private fun notifyNtfy(perAccount: List<Pair<String, Int>>) {
+        if (ntfyClient == null) return
         if (perAccount.isEmpty()) return
 
-        val total = perAccount.sumOf { it.second.size }
+        val total = perAccount.sumOf { it.second }
         if (total == 0) return
-
-        notifyInflows(ynabMappings, perAccount)
 
         val title = "$total nye transaksjoner syncet"
         val body = perAccount
-            .filter { it.second.isNotEmpty() }
-            .joinToString(", ") { (label, count) -> "${count.size} nye for $label" }
-        notify(title, listOf("tada"), body)
-    }
-
-    private fun notifyInflows(ynabMappings: YnabMappings, perAccount: List<Pair<String, List<Transaksjon>>>) {
-        val today = LocalDate.now()
-        val accountsWithInflow = ynabMappings
-            .mappings
-            .filter { it.monitorInflow }
-            .mapNotNull { ynabAccount ->
-                perAccount
-                    .firstOrNull { it.first == ynabAccount.primaryAccountNumber }
-                    ?.second
-                    // bare bry oss om positive beløp
-                    ?.filter { it.signedAmount > 0 }
-                    // ikke bry oss om interne overføringer
-                    ?.filter { it.transferPayeeId == null }
-                    // bare bry oss om ferske transaksjoner (fanger settlement-lag fra banken)
-                    ?.filter { it.date >= today.minusDays(2) }
-                    ?.let { inflows ->
-                        (ynabAccount.notificationName ?: ynabAccount.primaryAccountNumber) to inflows
-                    }
-            }
-        if (accountsWithInflow.isEmpty()) return
-
-        val numberFormat = NumberFormat.getCurrencyInstance(Locale.of("no", "NO")).apply {
-            maximumFractionDigits = 2
-            minimumFractionDigits = 0
-        }
-        val totalInflow = accountsWithInflow.sumOf { it.second.sumOf { it.signedAmount } }
-        val title = "${numberFormat.format(totalInflow)} inn på konto"
-        val body = accountsWithInflow.joinToString(separator = "\n\n") { (label, amount) ->
-            """
-                $label:
-                ${amount.joinToString(separator = "\n") { "${numberFormat.format(it.signedAmount)} fra ${it.payee}" } }
-            """.trimIndent()
-        }
-        notify(title, listOf("moneybag", "money_mouth_face"), body)
-    }
-
-    private fun notify(title: String, tags: List<String>, body: String) {
-        val req = HttpRequest.newBuilder()
-            .uri(URI.create("https://ntfy.sh/$ntfyTopic"))
-            .header("Title", title)
-            .header("Tags", tags.joinToString(","))
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build()
-        val resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding())
-        if (resp.statusCode() !in 200..299) {
-            error("ntfy svarte med ${resp.statusCode()} for sync-varsel")
-        }
+            .filter { it.second > 0 }
+            .joinToString(", ") { (label, count) -> "$count nye for $label" }
+        ntfyClient.notify(title, listOf("tada"), body)
     }
 }
 
@@ -126,38 +68,30 @@ private fun pushTilYnab(
     ynab: YnabClient,
     budgetId: String,
     mapping: AccountMapping,
-    transactions: List<JsonNode>,
+    transactions: List<TransactionDto>,
     transferPayees: Map<String, String>,
-): List<Transaksjon> {
+): Int {
     val label = mapping.label ?: mapping.primaryAccountNumber
     log.info("Pusher {} ({}): {} transaksjoner", label, mapping.primaryAccountNumber, transactions.size)
 
-    val parsed = transactions.mapNotNull { Transaksjon.fromNode(it, transferPayees) }
+    val parsed = transactions
+        .mapNotNull { Transaksjon.fromDto(it, transferPayees) }
+        .withOccurrenceCounter()
 
     val payload = parsed
         .mapNotNull { it.tilYnabApi(mapping.ynabAccountId) }
     val skipped = transactions.size - payload.size
     if (payload.isEmpty()) {
         log.info("  Ingen transaksjoner å pushe (hoppet over {} pending/før pushFrom/ugyldige)", skipped)
-        return emptyList()
+        return 0
     }
     val data = ynab.createTransactions(budgetId, payload)
-    val transactionsById = data
-        .path("transactions")
-        .values()
-        .associateBy { it.path("id").asString() }
 
-    // maps the created ynab transactions to the correct Transaction object
-    // by using the importId as reference
     val created = data
         .path("transaction_ids")
-        .values()
-        .map {
-            val importId = transactionsById.getValue(it.asString()).path("import_id").asString()
-            parsed.single { it.importId == importId}
-        }
+        .size()
 
     val duplicates = data.path("duplicate_import_ids").size()
-    log.info("  Pushet {} nye, {} duplikater hoppet over, {} hoppet over (pending/før pushFrom)", created.size, duplicates, skipped)
+    log.info("  Pushet {} nye, {} duplikater hoppet over, {} hoppet over (pending/før pushFrom)", created, duplicates, skipped)
     return created
 }
