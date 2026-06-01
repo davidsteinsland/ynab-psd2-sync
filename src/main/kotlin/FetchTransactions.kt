@@ -133,13 +133,15 @@ internal class FetchTransactions(
         val totalInflow = accountsWithInflow.sumOf { it.second.sumOf { it.transactionAmount.amountAsDouble!! } }
         val title = "${numberFormat.format(totalInflow)} inn på konto"
         val body = accountsWithInflow.joinToString(separator = "\n\n") { (label, txs) ->
+            val transactions = txs.joinToString(separator = "\n") {
+                val avsender = (it.debtor?.name ?: it.debtorAccount?.other?.identification)?.let { "fra $it " } ?: ""
+                val remittance = it.remittanceInformation.joinToString()
+                "${numberFormat.format(it.transactionAmount.amountAsDouble)} $avsender($remittance)"
+            }
             """
-                ${label.notificationName}:
-                ${txs.joinToString(separator = "\n") {
-                    val avsender = it.debtor?.name ?: "${it.debtorAccount?.other?.identification} (${it.remittanceInformation.joinToString()})"
-                    "${numberFormat.format(it.transactionAmount.amountAsDouble)} fra $avsender" 
-                } }
-            """.trimIndent()
+                |${label.notificationName}:
+                |$transactions
+            """.trimMargin()
         }
         ntfyClient.notify(title, listOf("moneybag", "money_mouth_face"), body)
     }
