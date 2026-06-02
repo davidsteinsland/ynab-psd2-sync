@@ -95,7 +95,7 @@ internal data class Transaksjon(
                 date = date,
                 signedAmount = signedAmount,
                 transferPayeeId = transferPayeeId,
-                payee = payee,
+                payee = payee ?: counterpartyBban,
                 memo = memo,
                 booked = isBooked,
                 fingerprint = node.fingerprint,
