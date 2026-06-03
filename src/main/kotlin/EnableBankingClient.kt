@@ -243,6 +243,7 @@ private fun createFingerprint(
     valueDate: LocalDate?,
     transactionDate: LocalDate?
 ): String {
+    if (entryReference != null && entryReference.length > 4) return fingerprintFromEntryReference(entryReference)
     // har sett tilfeller hvor entryReference "0" og "21" har blitt brukt på flere transaksjoner,
     // derfor er beste løsning å lage egen fingerprint basert på flere felter
     val payload = listOfNotNull(
@@ -257,6 +258,14 @@ private fun createFingerprint(
     val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
     val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
     return ("EBH:$b64")
+}
+
+private fun fingerprintFromEntryReference(entryReference: String): String {
+    val candidate = "EB:$entryReference"
+    if (candidate.length <= 36) return candidate
+    val digest = MessageDigest.getInstance("SHA-256").digest(entryReference.toByteArray(Charsets.UTF_8))
+    val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+    return ("EB:$b64").take(36)
 }
 
 enum class StatusDto {
