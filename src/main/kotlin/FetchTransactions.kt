@@ -17,12 +17,13 @@ internal class FetchTransactions(
     val mappingsStore: YnabMappingsStore,
     val objectMapper: ObjectMapper,
     val expiryNotifier: SessionExpiryNotifier,
-    val ntfyClient: NtfyClient?
+    val ntfyClient: NtfyClient?,
+    numberOfDaysToFetch: Int = 7,
+    val fetchTransactionsTo: LocalDate = LocalDate.now()
 ): Command {
-    override fun run() {
-        val fetchTransactionsFrom = LocalDate.now().minusDays(7)
-        val fetchTransactionsTo = LocalDate.now()
+    private val fetchTransactionsFrom = fetchTransactionsTo.minusDays(numberOfDaysToFetch.toLong())
 
+    override fun run() {
         val root = stateStore.loadRoot()
         if (root.sessions.isEmpty()) error("Ingen lagrede sesjoner. Kjør med --init først.")
 

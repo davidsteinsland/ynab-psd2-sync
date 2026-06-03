@@ -94,6 +94,7 @@ private fun run(args: List<String>) {
             objectMapper = objectMapper,
             expiryNotifier = expiryNotifier,
             ntfyClient = ntfyClient,
+            numberOfDaysToFetch = System.getenv("DAYS_TO_FETCH")?.toIntOrNull() ?: 2,
         )
     }
     cmd.run()
