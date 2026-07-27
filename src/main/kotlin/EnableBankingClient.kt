@@ -243,7 +243,7 @@ private fun createFingerprint(
     valueDate: LocalDate?,
     transactionDate: LocalDate?
 ): String {
-    if (entryReference != null && entryReference.length in 4..10) return fingerprintFromEntryReference(entryReference)
+    if (entryReference != null && entryReference.length > 4 && entryReference.length != 11) return fingerprintFromEntryReference(entryReference)
     // har sett tilfeller hvor entryReference "0" og "21" har blitt brukt på flere transaksjoner,
     // derfor er beste løsning å lage egen fingerprint basert på flere felter.
     // ignorerer også entry_reference som er 11 tegn eller mer, da jeg har observert at
