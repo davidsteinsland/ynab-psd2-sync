@@ -243,9 +243,11 @@ private fun createFingerprint(
     valueDate: LocalDate?,
     transactionDate: LocalDate?
 ): String {
-    if (entryReference != null && entryReference.length > 4) return fingerprintFromEntryReference(entryReference)
+    if (entryReference != null && entryReference.length in 4..10) return fingerprintFromEntryReference(entryReference)
     // har sett tilfeller hvor entryReference "0" og "21" har blitt brukt på flere transaksjoner,
-    // derfor er beste løsning å lage egen fingerprint basert på flere felter
+    // derfor er beste løsning å lage egen fingerprint basert på flere felter.
+    // ignorerer også entry_reference som er 11 tegn eller mer, da jeg har observert at
+    // enkelte kontoer har kontonumre som entry_reference (månedlig avdrag på boliglån fremkommer med samme entry_referenve hver måned)
     val payload = listOfNotNull(
         entryReference,
         bookingDate,
